@@ -56,7 +56,7 @@ const unlockCode = (lockId: string) => lockId.replace(/-/g, "").slice(0, 6).toUp
 
 export default async function AppPage() {
   const user = await requireUser();
-  const db = readDB();
+  const db = await readDB();
   const consent = db.consentProfiles.find((item) => item.userId === user.id);
   const promo = db.promos.find((item) => item.userId === user.id);
 

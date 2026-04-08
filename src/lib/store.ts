@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 export type Role = "dom" | "sub" | "neutral";
 export type TaskStatus =
@@ -229,29 +230,19 @@ export type DB = {
   directMessages: DirectMessage[];
 };
 
-type Backend = "file" | "memory";
+type Backend = "neon" | "file" | "memory";
 
-const globalStore = globalThis as typeof globalThis & {
+type GlobalStore = typeof globalThis & {
   __webappMemoryDB?: DB;
   __webappBackend?: Backend;
+  __webappNeon?: NeonQueryFunction;
 };
 
-const resolveBaseDir = () => {
-  if (process.env.WEBAPP_DATA_DIR) {
-    return process.env.WEBAPP_DATA_DIR;
-  }
-  if (
-    process.env.VERCEL ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.FUNCTIONS_WORKER_RUNTIME
-  ) {
-    return path.join("/tmp", "webapp");
-  }
-  return process.cwd();
-};
+const globalStore = globalThis as GlobalStore;
 
-const DATA_DIR = path.join(resolveBaseDir(), "data");
+const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
+const DB_KEY = "primary";
 
 const nowIso = () => new Date().toISOString();
 
@@ -425,48 +416,103 @@ const seedData = (): DB => {
   };
 };
 
-const ensureDB = (): DB => {
-  if (!globalStore.__webappBackend) {
-    globalStore.__webappBackend = "file";
+const normalizeDB = (data?: Partial<DB> | null): DB => {
+  const resolved: DB = {
+    users: data?.users ?? [],
+    sessions: data?.sessions ?? [],
+    consentProfiles: data?.consentProfiles ?? [],
+    taskTemplates: data?.taskTemplates ?? [],
+    tasks: data?.tasks ?? [],
+    approvals: data?.approvals ?? [],
+    trainingPlans: data?.trainingPlans ?? [],
+    roleplayEntries: data?.roleplayEntries ?? [],
+    chastityLogs: data?.chastityLogs ?? [],
+    chastityLocks: data?.chastityLocks ?? [],
+    lockEvents: data?.lockEvents ?? [],
+    keyholderRequests: data?.keyholderRequests ?? [],
+    lockAddons: data?.lockAddons ?? [],
+    adventures: data?.adventures ?? [],
+    ownerships: data?.ownerships ?? [],
+    content: data?.content ?? [],
+    promos: data?.promos ?? [],
+    rooms: data?.rooms ?? [],
+    messages: data?.messages ?? [],
+    directMessages: data?.directMessages ?? [],
+  };
+  return resolved;
+};
+
+const resolveDbUrl = () =>
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  "";
+
+const getSql = () => {
+  const url = resolveDbUrl();
+  if (!url) return null;
+  if (!globalStore.__webappNeon) {
+    globalStore.__webappNeon = neon(url);
   }
-  if (globalStore.__webappBackend === "memory") {
-    if (!globalStore.__webappMemoryDB) {
-      globalStore.__webappMemoryDB = seedData();
-    }
-    return globalStore.__webappMemoryDB;
+  return globalStore.__webappNeon;
+};
+
+const ensurePostgresSchema = async (sql: NeonQueryFunction) => {
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_state (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+};
+
+const ensureFileDB = (): DB => {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(DB_PATH)) {
+    const seeded = seedData();
+    fs.writeFileSync(DB_PATH, JSON.stringify(seeded, null, 2));
+    return seeded;
+  }
+  const raw = fs.readFileSync(DB_PATH, "utf8");
+  const data = JSON.parse(raw) as Partial<DB>;
+  return normalizeDB(data);
+};
+
+const readFromPostgres = async (sql: NeonQueryFunction): Promise<DB> => {
+  await ensurePostgresSchema(sql);
+  const result = await sql`SELECT data FROM app_state WHERE id = ${DB_KEY}`;
+  const row = result[0] as { data?: Partial<DB> } | undefined;
+  if (!row?.data) {
+    const seeded = seedData();
+    await writeToPostgres(sql, seeded);
+    return seeded;
+  }
+  return normalizeDB(row.data);
+};
+
+const writeToPostgres = async (sql: NeonQueryFunction, db: DB) => {
+  await ensurePostgresSchema(sql);
+  const payload = JSON.stringify(db);
+  await sql`
+    INSERT INTO app_state (id, data, updated_at)
+    VALUES (${DB_KEY}, ${payload}::jsonb, NOW())
+    ON CONFLICT (id)
+    DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+  `;
+};
+
+export const readDB = async (): Promise<DB> => {
+  const sql = getSql();
+  if (sql) {
+    globalStore.__webappBackend = "neon";
+    return readFromPostgres(sql);
   }
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(DB_PATH)) {
-      const seeded = seedData();
-      fs.writeFileSync(DB_PATH, JSON.stringify(seeded, null, 2));
-      return seeded;
-    }
-    const raw = fs.readFileSync(DB_PATH, "utf8");
-    const data = JSON.parse(raw) as Partial<DB>;
-    data.users ??= [];
-    data.sessions ??= [];
-    data.consentProfiles ??= [];
-    data.taskTemplates ??= [];
-    data.tasks ??= [];
-    data.approvals ??= [];
-    data.trainingPlans ??= [];
-    data.roleplayEntries ??= [];
-    data.chastityLogs ??= [];
-    data.chastityLocks ??= [];
-    data.lockEvents ??= [];
-    data.keyholderRequests ??= [];
-    data.lockAddons ??= [];
-    data.adventures ??= [];
-    data.ownerships ??= [];
-    data.content ??= [];
-    data.promos ??= [];
-    data.rooms ??= [];
-    data.messages ??= [];
-    data.directMessages ??= [];
-    return data as DB;
+    globalStore.__webappBackend = "file";
+    return ensureFileDB();
   } catch {
     globalStore.__webappBackend = "memory";
     if (!globalStore.__webappMemoryDB) {
@@ -476,13 +522,18 @@ const ensureDB = (): DB => {
   }
 };
 
-export const readDB = (): DB => ensureDB();
+export const writeDB = async (db: DB) => {
+  const sql = getSql();
+  if (sql) {
+    await writeToPostgres(sql, db);
+    return;
+  }
 
-export const writeDB = (db: DB) => {
   if (globalStore.__webappBackend === "memory") {
     globalStore.__webappMemoryDB = db;
     return;
   }
+
   try {
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
   } catch {
@@ -491,10 +542,12 @@ export const writeDB = (db: DB) => {
   }
 };
 
-export const updateDB = <T>(fn: (db: DB) => T): T => {
-  const db = ensureDB();
-  const result = fn(db);
-  writeDB(db);
+export const updateDB = async <T>(
+  fn: (db: DB) => T | Promise<T>,
+): Promise<T> => {
+  const db = await readDB();
+  const result = await fn(db);
+  await writeDB(db);
   return result;
 };
 

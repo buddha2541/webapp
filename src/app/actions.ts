@@ -43,7 +43,7 @@ export async function signUp(formData: FormData) {
   }
 
   const { username, password, role } = parsed.data;
-  const db = readDB();
+  const db = await readDB();
   if (db.users.some((user) => user.username === username)) {
     redirect("/auth?error=exists");
   }
@@ -51,7 +51,7 @@ export async function signUp(formData: FormData) {
   const passwordHash = await hashPassword(password);
   const userId = createId();
 
-  updateDB((store) => {
+  await updateDB((store) => {
     store.users.push({
       id: userId,
       username,
@@ -86,7 +86,7 @@ export async function signIn(formData: FormData) {
   }
 
   const { username, password } = parsed.data;
-  const db = readDB();
+  const db = await readDB();
   const user = db.users.find((item) => item.username === username);
   if (!user || !user.passwordHash) {
     redirect("/auth?error=invalid");
@@ -115,7 +115,7 @@ export async function createGuest(formData: FormData) {
   }
 
   const guestId = createId();
-  const db = readDB();
+  const db = await readDB();
   let username = `guest-${Math.floor(Math.random() * 9000 + 1000)}`;
   let attempts = 0;
   while (db.users.some((item) => item.username === username) && attempts < 5) {
@@ -123,7 +123,7 @@ export async function createGuest(formData: FormData) {
     attempts += 1;
   }
 
-  updateDB((store) => {
+  await updateDB((store) => {
     store.users.push({
       id: guestId,
       username,
@@ -163,7 +163,7 @@ export async function updateProfile(formData: FormData) {
     redirect("/app?error=profile");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find((item) => item.id === user.id);
     if (!target) return;
     target.role = parsed.data.role as Role;
@@ -195,7 +195,7 @@ export async function saveConsent(formData: FormData) {
     redirect("/app?error=consent");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const existing = db.consentProfiles.find((item) => item.userId === user.id);
     const payload = {
       id: existing?.id || createId(),
@@ -234,7 +234,7 @@ export async function createTemplate(formData: FormData) {
     redirect("/app?error=template");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find((item) => item.id === user.id);
     if (!target || target.role !== "dom") return;
 
@@ -272,7 +272,7 @@ export async function createTask(formData: FormData) {
     redirect("/app?error=task");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find((item) => item.id === user.id);
     if (!target || target.role !== "dom") return;
 
@@ -298,7 +298,7 @@ export async function claimTask(formData: FormData) {
   const user = await requireUser();
   const taskId = String(formData.get("taskId"));
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find((item) => item.id === user.id);
     const task = db.tasks.find((item) => item.id === taskId);
     if (!target || !task) return;
@@ -316,7 +316,7 @@ export async function submitTask(formData: FormData) {
   const user = await requireUser();
   const taskId = String(formData.get("taskId"));
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const task = db.tasks.find((item) => item.id === taskId);
     if (!task) return;
     if (task.assignedToId !== user.id) return;
@@ -347,7 +347,7 @@ export async function reviewTask(formData: FormData) {
     redirect("/app?error=review");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const reviewer = db.users.find((item) => item.id === user.id);
     if (!reviewer || reviewer.role !== "dom") return;
 
@@ -407,7 +407,7 @@ export async function createPromo(formData: FormData) {
     redirect("/app?error=promo");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find((item) => item.id === user.id);
     if (!target || target.role !== "dom") return;
 
@@ -455,7 +455,7 @@ export async function addContent(formData: FormData) {
     redirect("/app?error=content");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.content.unshift({
       id: createId(),
       userId: user.id,
@@ -490,7 +490,7 @@ export async function addTrainingPlan(formData: FormData) {
     redirect("/app?error=training");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.trainingPlans.unshift({
       id: createId(),
       userId: user.id,
@@ -523,7 +523,7 @@ export async function addRoleplayEntry(formData: FormData) {
     redirect("/app?error=roleplay");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.roleplayEntries.unshift({
       id: createId(),
       userId: user.id,
@@ -555,7 +555,7 @@ export async function addChastityLog(formData: FormData) {
     redirect("/app?error=chastity");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.chastityLogs.unshift({
       id: createId(),
       userId: user.id,
@@ -585,7 +585,7 @@ export async function markTaskStatus(formData: FormData) {
     redirect("/app?error=task");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.tasks.find((item) => item.id === parsed.data.taskId);
     if (!target) return;
     if (user.role !== "dom") return;
@@ -617,7 +617,7 @@ export async function createLock(formData: FormData) {
     Date.now() + parsed.data.durationHours * 60 * 60 * 1000,
   ).toISOString();
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.chastityLocks.unshift({
       id: createId(),
       ownerId: user.id,
@@ -651,7 +651,7 @@ export async function adjustLockTime(formData: FormData) {
     redirect("/app?error=lock");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const lock = db.chastityLocks.find((item) => item.id === parsed.data.lockId);
     if (!lock) return;
     const isOwner = lock.ownerId === user.id;
@@ -691,7 +691,7 @@ export async function unlockLock(formData: FormData) {
     redirect("/app?error=lock");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const lock = db.chastityLocks.find((item) => item.id === parsed.data.lockId);
     if (!lock) return;
     const isOwner = lock.ownerId === user.id;
@@ -730,7 +730,7 @@ export async function requestKeyholder(formData: FormData) {
     redirect("/app?error=keyholder");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const lock = db.chastityLocks.find((item) => item.id === parsed.data.lockId);
     const target = db.users.find(
       (item) => item.username === parsed.data.targetUsername,
@@ -767,7 +767,7 @@ export async function respondKeyholderRequest(formData: FormData) {
     redirect("/app?error=keyholder");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const request = db.keyholderRequests.find(
       (item) => item.id === parsed.data.requestId,
     );
@@ -811,7 +811,7 @@ export async function addLockAddon(formData: FormData) {
     redirect("/app?error=addon");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const lock = db.chastityLocks.find((item) => item.id === parsed.data.lockId);
     if (!lock) return;
     const isOwner = lock.ownerId === user.id;
@@ -846,7 +846,7 @@ export async function addAdventure(formData: FormData) {
     redirect("/app?error=adventure");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.adventures.unshift({
       id: createId(),
       userId: user.id,
@@ -875,7 +875,7 @@ export async function sendDirectMessage(formData: FormData) {
     redirect("/app?error=dm");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const target = db.users.find(
       (item) => item.username === parsed.data.toUsername,
     );
@@ -907,7 +907,7 @@ export async function assignOwnership(formData: FormData) {
     redirect("/app?error=ownership");
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     const dom = db.users.find((item) => item.id === user.id);
     if (!dom || dom.role !== "dom") return;
     const sub = db.users.find(

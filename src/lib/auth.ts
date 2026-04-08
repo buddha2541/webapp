@@ -24,7 +24,7 @@ export const createSession = async (userId: string) => {
   const expiresAt = addDays(SESSION_DAYS);
   const isProd = process.env.NODE_ENV === "production";
 
-  updateDB((db) => {
+  await updateDB((db) => {
     db.sessions.push({
       id: createId(),
       userId,
@@ -48,7 +48,7 @@ export const clearSession = async () => {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (token) {
-    updateDB((db) => {
+    await updateDB((db) => {
       db.sessions = db.sessions.filter((session) => session.token !== token);
     });
   }
@@ -65,7 +65,7 @@ export const getUser = async () => {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
-  const db = readDB();
+  const db = await readDB();
   const session = db.sessions.find((item) => item.token === token);
   if (!session) return null;
 

@@ -4,8 +4,8 @@ import { createId, now, readDB, updateDB } from "@/lib/store";
 
 export const runtime = "nodejs";
 
-const resolveRoom = (slug: string) => {
-  const db = readDB();
+const resolveRoom = async (slug: string) => {
+  const db = await readDB();
   const room = db.rooms.find((item) => item.slug === slug);
   return room || null;
 };
@@ -18,12 +18,12 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const roomSlug = url.searchParams.get("room") || "general";
-  const room = resolveRoom(roomSlug);
+  const room = await resolveRoom(roomSlug);
   if (!room) {
     return NextResponse.json({ messages: [] });
   }
 
-  const db = readDB();
+  const db = await readDB();
   const messages = db.messages
     .filter((msg) => msg.roomId === room.id)
     .slice(-50)
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid message" }, { status: 400 });
   }
 
-  updateDB((db) => {
+  await updateDB((db) => {
     let room = db.rooms.find((item) => item.slug === roomSlug);
     if (!room) {
       room = {
