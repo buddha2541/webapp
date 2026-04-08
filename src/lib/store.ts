@@ -229,7 +229,28 @@ export type DB = {
   directMessages: DirectMessage[];
 };
 
-const DATA_DIR = path.join(process.cwd(), "data");
+type Backend = "file" | "memory";
+
+const globalStore = globalThis as typeof globalThis & {
+  __webappMemoryDB?: DB;
+  __webappBackend?: Backend;
+};
+
+const resolveBaseDir = () => {
+  if (process.env.WEBAPP_DATA_DIR) {
+    return process.env.WEBAPP_DATA_DIR;
+  }
+  if (
+    process.env.VERCEL ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.FUNCTIONS_WORKER_RUNTIME
+  ) {
+    return path.join("/tmp", "webapp");
+  }
+  return process.cwd();
+};
+
+const DATA_DIR = path.join(resolveBaseDir(), "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 
 const nowIso = () => new Date().toISOString();
@@ -405,43 +426,69 @@ const seedData = (): DB => {
 };
 
 const ensureDB = (): DB => {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!globalStore.__webappBackend) {
+    globalStore.__webappBackend = "file";
   }
-  if (!fs.existsSync(DB_PATH)) {
-    const seeded = seedData();
-    fs.writeFileSync(DB_PATH, JSON.stringify(seeded, null, 2));
-    return seeded;
+  if (globalStore.__webappBackend === "memory") {
+    if (!globalStore.__webappMemoryDB) {
+      globalStore.__webappMemoryDB = seedData();
+    }
+    return globalStore.__webappMemoryDB;
   }
-  const raw = fs.readFileSync(DB_PATH, "utf8");
-  const data = JSON.parse(raw) as Partial<DB>;
-  data.users ??= [];
-  data.sessions ??= [];
-  data.consentProfiles ??= [];
-  data.taskTemplates ??= [];
-  data.tasks ??= [];
-  data.approvals ??= [];
-  data.trainingPlans ??= [];
-  data.roleplayEntries ??= [];
-  data.chastityLogs ??= [];
-  data.chastityLocks ??= [];
-  data.lockEvents ??= [];
-  data.keyholderRequests ??= [];
-  data.lockAddons ??= [];
-  data.adventures ??= [];
-  data.ownerships ??= [];
-  data.content ??= [];
-  data.promos ??= [];
-  data.rooms ??= [];
-  data.messages ??= [];
-  data.directMessages ??= [];
-  return data as DB;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_PATH)) {
+      const seeded = seedData();
+      fs.writeFileSync(DB_PATH, JSON.stringify(seeded, null, 2));
+      return seeded;
+    }
+    const raw = fs.readFileSync(DB_PATH, "utf8");
+    const data = JSON.parse(raw) as Partial<DB>;
+    data.users ??= [];
+    data.sessions ??= [];
+    data.consentProfiles ??= [];
+    data.taskTemplates ??= [];
+    data.tasks ??= [];
+    data.approvals ??= [];
+    data.trainingPlans ??= [];
+    data.roleplayEntries ??= [];
+    data.chastityLogs ??= [];
+    data.chastityLocks ??= [];
+    data.lockEvents ??= [];
+    data.keyholderRequests ??= [];
+    data.lockAddons ??= [];
+    data.adventures ??= [];
+    data.ownerships ??= [];
+    data.content ??= [];
+    data.promos ??= [];
+    data.rooms ??= [];
+    data.messages ??= [];
+    data.directMessages ??= [];
+    return data as DB;
+  } catch {
+    globalStore.__webappBackend = "memory";
+    if (!globalStore.__webappMemoryDB) {
+      globalStore.__webappMemoryDB = seedData();
+    }
+    return globalStore.__webappMemoryDB;
+  }
 };
 
 export const readDB = (): DB => ensureDB();
 
 export const writeDB = (db: DB) => {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  if (globalStore.__webappBackend === "memory") {
+    globalStore.__webappMemoryDB = db;
+    return;
+  }
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+  } catch {
+    globalStore.__webappBackend = "memory";
+    globalStore.__webappMemoryDB = db;
+  }
 };
 
 export const updateDB = <T>(fn: (db: DB) => T): T => {
